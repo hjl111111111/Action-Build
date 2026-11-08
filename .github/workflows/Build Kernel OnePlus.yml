@@ -1023,12 +1023,26 @@ jobs:
         run: |
           cd kernel_workspace/kernel_platform/common
           CONFIG_FILE=./arch/arm64/configs/gki_defconfig
-          DEVICE_FRAG="${GITHUB_WORKSPACE}/configs/turbo6x_b_builtin.fragment"
+          DEVICE_FRAG=""
+          for c in \
+            "$GITHUB_WORKSPACE/configs/turbo6x_b_builtin.fragment" \
+            "$GITHUB_WORKSPACE/kernel_workspace/Action-Build/configs/turbo6x_b_builtin.fragment" \
+            "$GITHUB_WORKSPACE/kernel_workspace/Action-Build/turbo6x_b_builtin.fragment"; do
+            if [ -s "$c" ]; then DEVICE_FRAG="$c"; break; fi
+          done
+          if [ -z "$DEVICE_FRAG" ]; then
+            echo "fragment not in workspace; fetching from fork raw"
+            curl -fsSL --retry 3 --max-time 120 \
+              "https://raw.githubusercontent.com/${{ github.repository }}/${{ github.ref_name }}/configs/turbo6x_b_builtin.fragment" \
+              -o /tmp/turbo6x_b_builtin.fragment
+            DEVICE_FRAG=/tmp/turbo6x_b_builtin.fragment
+          fi
+          echo "using fragment: $DEVICE_FRAG"
+          echo "fragment lines: $(wc -l < "$DEVICE_FRAG")"
           if [ ! -s "$DEVICE_FRAG" ]; then
-            echo "::error::device config fragment missing: $DEVICE_FRAG"
+            echo "::error::device config fragment missing"
             exit 1
           fi
-          echo "Device fragment: $(wc -l < "$DEVICE_FRAG") CONFIG=y entries"
           cat "$DEVICE_FRAG" >> "$CONFIG_FILE"
           echo "--- critical device configs after merge ---"
           grep -E '^CONFIG_(ARCH_MEDIATEK|MTK_CPUX_TIMER|OPLUS_MTK_PLATFORM|MODVERSIONS)=' "$CONFIG_FILE" | tail -6
