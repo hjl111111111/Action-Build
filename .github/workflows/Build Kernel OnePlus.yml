@@ -1096,8 +1096,24 @@ jobs:
             echo "MERGED $f ($(wc -l < "$f") lines)"
           done
 
+          # 4) The official defconfig stores MODULE_SIG_KEY as a string
+          #    containing $(DEVICE_MODULES_REL_DIR). Under a bare make that
+          #    variable is undefined, so Kbuild resolves it to the absolute
+          #    path /certs/mtk_signing_key.pem and aborts with "No rule to
+          #    make target". Point it at the real pem in the device tree.
+          #    MODULE_SIG_FORCE is not set on this device, but using the
+          #    official key keeps the kernel byte-compatible with stock.
+          SIGKEY="$DEV/certs/mtk_signing_key.pem"
+          if [ ! -s "$SIGKEY" ]; then
+            echo "::error::official MTK signing key missing: $SIGKEY"
+            exit 1
+          fi
+          sed -i "s|^CONFIG_MODULE_SIG_KEY=.*|CONFIG_MODULE_SIG_KEY=\"$SIGKEY\"|" "$CFG"
+          echo "SIGKEY fixed -> $SIGKEY"
+
           echo "--- critical device configs now declared ---"
           grep -E '^CONFIG_(OPLUS_MTK_PLATFORM|OPLUS_CHARGER|UFSHID|DRM_MEDIATEK_V2|COMMON_CLK_MTK_FREQ_HOPPING_MCUPM)=' "$CFG" | tail -8 || true
+          grep -E '^CONFIG_MODULE_SIG_KEY=' "$CFG" | tail -2
 
       - name: Add Configuration Settings
         run: |
