@@ -1086,6 +1086,19 @@ jobs:
             set_config "CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS=y"
             set_config "CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG=y"
             set_config "CONFIG_KSU_SUSFS_OPEN_REDIRECT=y"
+            set_config "CONFIG_KSU_SUSFS_PRIORITY_UID_FILTER=y"
+            # SukiSU builtin v4.3.0+ manager unconditionally calls susfs priority
+            # functions, but its Kconfig lacks this symbol, so olddefconfig would
+            # drop the =y from defconfig and the declarations stay #ifdef'd out.
+            # Inject the missing Kconfig entry before defconfig is generated.
+            if [ -f ./drivers/kernelsu/Kconfig ] && ! grep -q "config KSU_SUSFS_PRIORITY_UID_FILTER" ./drivers/kernelsu/Kconfig; then
+              echo "" >> ./drivers/kernelsu/Kconfig
+              echo "config KSU_SUSFS_PRIORITY_UID_FILTER" >> ./drivers/kernelsu/Kconfig
+              printf '\tbool "Enable SUSFS priority uid filter"\n' >> ./drivers/kernelsu/Kconfig
+              printf '\tdepends on KSU_SUSFS\n' >> ./drivers/kernelsu/Kconfig
+              printf '\tdefault y\n' >> ./drivers/kernelsu/Kconfig
+              echo "  [+] Injected KSU_SUSFS_PRIORITY_UID_FILTER into Kconfig"
+            fi
           else
             set_config "CONFIG_KSU_SUSFS=n"
           fi
