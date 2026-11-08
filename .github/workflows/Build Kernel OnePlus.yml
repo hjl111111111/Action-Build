@@ -1047,6 +1047,58 @@ jobs:
           echo "--- critical device configs after merge ---"
           grep -E '^CONFIG_(ARCH_MEDIATEK|MTK_CPUX_TIMER|OPLUS_MTK_PLATFORM|MODVERSIONS)=' "$CONFIG_FILE" | tail -6
 
+      - name: Mount official MTK device Kconfig tree (Turbo6X)
+        run: |
+          set -euo pipefail
+          WS="$GITHUB_WORKSPACE/kernel_workspace"
+          COMMON="$WS/kernel_platform/common"
+
+          # 1) Locate the REAL Kconfig.ext (71 sources, ~4.6KB) in the modules tree.
+          #    Do NOT pick common/Kconfig.ext: that one is the 198-byte AOSP stub
+          #    with a single source line, which is why 166 device symbols vanish.
+          KEXT=$(find "$WS" -type f -name Kconfig.ext -size +3k 2>/dev/null | head -n 1)
+          if [ -z "$KEXT" ]; then
+            echo "::error::device Kconfig.ext (71 sources) not found"
+            exit 1
+          fi
+          DEV=$(dirname "$KEXT")
+          echo "DEVICE_MODULES_DIR=$DEV"
+          echo "DEVICE_MODULES_DIR=$DEV" >> "$GITHUB_ENV"
+          echo "KCONFIG_EXT_PREFIX=$DEV/" >> "$GITHUB_ENV"
+          echo "Kconfig.ext source lines: $(grep -c 'source ' "$KEXT")"
+
+          # 2) This manifest does not contain vendor/oplus. 20 of the 71 sources
+          #    point there. kconfig aborts on a missing source file, so create
+          #    empty stubs. Those 20 sources only define OPLUS-private symbols.
+          grep -oP 'source "\$\(KCONFIG_EXT_PREFIX\)\K[^"]+' "$KEXT" | while read -r rel; do
+            f="$DEV/$rel"
+            if [ ! -f "$f" ]; then
+              mkdir -p "$(dirname "$f")"
+              printf '# stub: vendor/oplus tree absent from this manifest\n' > "$f"
+              echo "STUB $rel"
+            fi
+          done
+
+          # 3) Merge the OFFICIAL device baseline into gki_defconfig as fragments.
+          #    The 1999-line /proc/config.gz fragment alone is NOT the baseline:
+          #    its =y entries for device symbols get dropped unless Kconfig.ext
+          #    has been sourced. Keep it, then append the official two files.
+          CFG="$COMMON/arch/arm64/configs/gki_defconfig"
+          for f in "$DEV/arch/arm64/configs/mgk_64_k61_defconfig" \
+                   "$DEV/kernel/configs/oplus6878.config"; do
+            if [ ! -s "$f" ]; then
+              echo "::error::missing official fragment $f"
+              exit 1
+            fi
+            echo "" >> "$CFG"
+            echo "# --- official device fragment: $(basename "$f") ---" >> "$CFG"
+            cat "$f" >> "$CFG"
+            echo "MERGED $f ($(wc -l < "$f") lines)"
+          done
+
+          echo "--- critical device configs now declared ---"
+          grep -E '^CONFIG_(OPLUS_MTK_PLATFORM|OPLUS_CHARGER|UFSHID|DRM_MEDIATEK_V2|COMMON_CLK_MTK_FREQ_HOPPING_MCUPM)=' "$CFG" | tail -8 || true
+
       - name: Add Configuration Settings
         run: |
           cd kernel_workspace/kernel_platform/common
@@ -1483,6 +1535,14 @@ jobs:
           fi
 
           make O=out "${MAKE_ARGS[@]}" olddefconfig --no-print-directory
+          echo "--- effective device values ---"
+          grep -E '^CONFIG_(OPLUS_MTK_PLATFORM|OPLUS_CHARGER|UFSHID|DRM_MEDIATEK_V2|COMMON_CLK_MTK_FREQ_HOPPING_MCUPM)=' out/.config || true
+          n=$(grep -cE '^CONFIG_(OPLUS_|MTK_|UFSHID|DRM_MEDIATEK)' out/.config || true)
+          echo "device-symbol count = $n"
+          if [ "$n" -lt 100 ]; then
+            echo "::error::Kconfig.ext was NOT sourced (device symbols still missing)"
+            exit 1
+          fi
           make -j"$(nproc --all)" O=out "${MAKE_ARGS[@]}"
           ccache -s
 
